@@ -41,7 +41,7 @@ def setup_sidebar():
                     st.metric("Average Amount", f"${analytics_data.average_amount:.2f}")
                     
                     if analytics_data.date_range["earliest"] and analytics_data.date_range["latest"]:
-                        date_range_days = (analytics_data.date_range["latest"] - analytics_data.date_range["latest"]).days
+                        date_range_days = (analytics_data.date_range["latest"] - analytics_data.date_range["earliest"]).days
                         st.metric("Date Range", f"{date_range_days} days")
                 
             except Exception as e:
@@ -135,61 +135,56 @@ def display_upload_section():
                 manual_review
             )
 
-async def process_image_file(upload_path: str) -> Dict[str, Any]:
-    """Process an image file and handle the result properly.
+def create_processing_result_from_dict(result_dict: Dict[str, Any], processing_time: float = 0.0) -> ProcessingResult:
+    """Convert dictionary result to ProcessingResult object.
     
     Args:
-        upload_path: Path to the uploaded image file
+        result_dict: Dictionary containing processing results
+        processing_time: Time taken for processing
         
     Returns:
-        Dictionary with processing results
+        ProcessingResult object
     """
     try:
-        # Import the process_image function here to avoid circular imports
-        from your_image_processing_module import process_image  # Replace with actual import
+        # Create a ProcessingResult object from the dictionary
+        processing_result = ProcessingResult()
         
-        result = await process_image(upload_path)
+        # Set basic attributes
+        processing_result.success = result_dict.get("success", False)
+        processing_result.processing_time = processing_time
+        processing_result.errors = result_dict.get("errors", [])
         
-        # Ensure result is a dictionary
-        if not isinstance(result, dict):
-            logger.error(f"Unexpected response format from image processor: {type(result)}")
-            return {
-                "success": False,
-                "error": "Unexpected response format from image processor"
-            }
+        # Handle confidence score
+        processing_result.confidence_score = result_dict.get("confidence", 0.0)
         
-        if result.get("success", False):
-            st.success("Image processed successfully!")
-            extracted_text = result.get("text", "No text extracted")
-            if extracted_text:
-                st.text(extracted_text)
-                return {
-                    "success": True,
-                    "text": extracted_text
-                }
-            else:
-                st.warning("No text was extracted from the image")
-                return {
-                    "success": True,
-                    "text": "",
-                    "warning": "No text extracted"
-                }
+        # If successful and has receipt data, set the receipt
+        if processing_result.success and "receipt" in result_dict:
+            processing_result.receipt = result_dict["receipt"]
+        elif processing_result.success and "text" in result_dict:
+            # If we only have text, we need to parse it into a receipt
+            # This is a placeholder - you'll need to implement text parsing
+            processing_result.receipt = None  # Implement text-to-receipt parsing here
         else:
-            st.error("Failed to process image.")
-            error_msg = result.get("error", "Unknown error occurred")
-            st.error(f"Error details: {error_msg}")
-            return {
-                "success": False,
-                "error": error_msg
-            }
+            processing_result.receipt = None
             
+        # Add any error messages
+        if not processing_result.success:
+            error_msg = result_dict.get("error", "Unknown processing error")
+            if error_msg not in processing_result.errors:
+                processing_result.errors.append(error_msg)
+        
+        return processing_result
+        
     except Exception as e:
-        logger.error(f"Error during image processing: {str(e)}", exc_info=True)
-        st.error(f"Error during image processing: {str(e)}")
-        return {
-            "success": False,
-            "error": str(e)
-        }
+        logger.error(f"Error creating ProcessingResult from dict: {str(e)}")
+        # Return a failed result
+        failed_result = ProcessingResult()
+        failed_result.success = False
+        failed_result.errors = [f"Error converting result: {str(e)}"]
+        failed_result.processing_time = processing_time
+        failed_result.confidence_score = 0.0
+        failed_result.receipt = None
+        return failed_result
 
 def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confidence_threshold: float, manual_review: bool):
     """Process uploaded files and display results.
@@ -225,6 +220,8 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
     low_confidence_items = []
     
     for i, uploaded_file in enumerate(uploaded_files):
+        start_time = datetime.now()
+        
         try:
             # Update progress
             progress = (i + 1) / len(uploaded_files)
@@ -235,8 +232,19 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
             file_content = uploaded_file.read()
             uploaded_file.seek(0)  # Reset file pointer
             
-            # Process file
-            result = file_processor.process_file(file_content, uploaded_file.name)
+            # Process file - handle both dict and object returns
+            raw_result = file_processor.process_file(file_content, uploaded_file.name)
+            
+            # Calculate processing time
+            processing_time = (datetime.now() - start_time).total_seconds()
+            
+            # Convert to ProcessingResult if it's a dictionary
+            if isinstance(raw_result, dict):
+                result = create_processing_result_from_dict(raw_result, processing_time)
+            else:
+                result = raw_result  # Assume it's already a ProcessingResult object
+                if not hasattr(result, 'processing_time'):
+                    result.processing_time = processing_time
             
             # Record processing info
             file_info = {
@@ -286,7 +294,7 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
                     
             else:
                 # Processing failed
-                file_info['errors'] = result.errors
+                file_info['errors'] = result.errors if hasattr(result, 'errors') else ["Unknown error"]
                 failed_processes += 1
             
             # Add to processed files history
@@ -327,6 +335,18 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
         
         if failed_processes > 0:
             st.error(f"Failed to process {failed_processes} file(s)")
+            
+            # Show error details for failed files
+            with st.expander("❌ View Failed Files", expanded=False):
+                failed_files = [f for f in st.session_state.processed_files if f['status'] in ['Failed', 'Error']]
+                for file_info in failed_files[-5:]:  # Show last 5 failed files
+                    st.write(f"**{file_info['filename']}**")
+                    if 'error' in file_info:
+                        st.text(f"Error: {file_info['error']}")
+                    if 'errors' in file_info:
+                        for error in file_info['errors']:
+                            st.text(f"• {error}")
+                    st.markdown("---")
         
         # Manual review section
         if low_confidence_items:
@@ -359,31 +379,31 @@ def display_manual_review_item(item: Dict[str, Any], db_manager, auto_categorize
             col1, col2 = st.columns(2)
             
             with col1:
-                vendor = st.text_input("Vendor", value=result.receipt.vendor)
+                vendor = st.text_input("Vendor", value=result.receipt.vendor or "")
                 amount = st.number_input(
                     "Amount", 
-                    value=float(result.receipt.amount),
+                    value=float(result.receipt.amount) if result.receipt.amount else 0.0,
                     min_value=0.01,
                     step=0.01,
                     format="%.2f"
                 )
-                date_value = st.date_input("Date", value=result.receipt.transaction_date)
+                date_value = st.date_input("Date", value=result.receipt.transaction_date or datetime.now().date())
             
             with col2:
                 categories = ["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment", 
                              "Healthcare", "Travel", "Business", "Education", "Other"]
                 
                 initial_category = result.receipt.category
-                if auto_categorize and initial_category not in categories:
+                if auto_categorize and (not initial_category or initial_category not in categories):
                     initial_category = categorize_receipt(result.receipt)
                 
                 category_index = 0
-                if initial_category in categories:
+                if initial_category and initial_category in categories:
                     category_index = categories.index(initial_category)
                 
                 category = st.selectbox("Category", categories, index=category_index)
                 currency = st.selectbox("Currency", ["USD", "EUR", "GBP", "JPY"], 
-                                      index=["USD", "EUR", "GBP", "JPY"].index(result.receipt.currency))
+                                      index=["USD", "EUR", "GBP", "JPY"].index(result.receipt.currency) if result.receipt.currency in ["USD", "EUR", "GBP", "JPY"] else 0)
                 description = st.text_area("Description", value=result.receipt.description or "")
             
             col1, col2, col3 = st.columns(3)
@@ -424,7 +444,7 @@ def display_manual_review_item(item: Dict[str, Any], db_manager, auto_categorize
     
     else:
         st.error("❌ No receipt data extracted")
-        if result.errors:
+        if hasattr(result, 'errors') and result.errors:
             for error in result.errors:
                 st.text(f"• {error}")
 
@@ -437,6 +457,9 @@ def categorize_receipt(receipt) -> str:
     Returns:
         Category string
     """
+    if not receipt or not hasattr(receipt, 'vendor') or not receipt.vendor:
+        return "Other"
+        
     vendor_lower = receipt.vendor.lower()
     
     # Food & Dining patterns
