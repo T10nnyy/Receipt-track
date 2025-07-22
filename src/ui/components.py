@@ -41,7 +41,7 @@ def setup_sidebar():
                     st.metric("Average Amount", f"${analytics_data.average_amount:.2f}")
                     
                     if analytics_data.date_range["earliest"] and analytics_data.date_range["latest"]:
-                        date_range_days = (analytics_data.date_range["latest"] - analytics_data.date_range["earliest"]).days
+                        date_range_days = (analytics_data.date_range["latest"] - analytics_data.date_range["latest"]).days
                         st.metric("Date Range", f"{date_range_days} days")
                 
             except Exception as e:
@@ -134,6 +134,62 @@ def display_upload_section():
                 confidence_threshold, 
                 manual_review
             )
+
+async def process_image_file(upload_path: str) -> Dict[str, Any]:
+    """Process an image file and handle the result properly.
+    
+    Args:
+        upload_path: Path to the uploaded image file
+        
+    Returns:
+        Dictionary with processing results
+    """
+    try:
+        # Import the process_image function here to avoid circular imports
+        from your_image_processing_module import process_image  # Replace with actual import
+        
+        result = await process_image(upload_path)
+        
+        # Ensure result is a dictionary
+        if not isinstance(result, dict):
+            logger.error(f"Unexpected response format from image processor: {type(result)}")
+            return {
+                "success": False,
+                "error": "Unexpected response format from image processor"
+            }
+        
+        if result.get("success", False):
+            st.success("Image processed successfully!")
+            extracted_text = result.get("text", "No text extracted")
+            if extracted_text:
+                st.text(extracted_text)
+                return {
+                    "success": True,
+                    "text": extracted_text
+                }
+            else:
+                st.warning("No text was extracted from the image")
+                return {
+                    "success": True,
+                    "text": "",
+                    "warning": "No text extracted"
+                }
+        else:
+            st.error("Failed to process image.")
+            error_msg = result.get("error", "Unknown error occurred")
+            st.error(f"Error details: {error_msg}")
+            return {
+                "success": False,
+                "error": error_msg
+            }
+            
+    except Exception as e:
+        logger.error(f"Error during image processing: {str(e)}", exc_info=True)
+        st.error(f"Error during image processing: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
 
 def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confidence_threshold: float, manual_review: bool):
     """Process uploaded files and display results.
