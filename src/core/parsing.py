@@ -22,6 +22,7 @@ from .models import ReceiptCreate, ProcessingResult
 from .currency_detector import CurrencyDetector, MultiLanguageProcessor
 
 logger = logging.getLogger(__name__)
+pytesseract.pytesseract.tesseract_cmd = r"C:\Users\Rachit Singh\OneDrive\Desktop\tesseract.exe"
 
 class FileProcessor:
     """Handles file processing and data extraction from receipts."""

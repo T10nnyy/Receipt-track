@@ -394,6 +394,7 @@ def main():
         logger.error(f"Error in Data Explorer: {str(e)}")
         st.error(f"An error occurred: {str(e)}")
 
+
 def display_edit_form(receipt, db_manager):
     """Display comprehensive edit form for a selected receipt.
     
@@ -648,129 +649,6 @@ def display_bulk_operations(selected_indices, receipts, db_manager):
                     
                 except Exception as e:
                     st.error(f"❌ Bulk deletion failed: {str(e)}")
-
-
-if __name__ == "__main__":
-    main()
-        
-        with col1:
-            new_vendor = st.text_input("Vendor", value=receipt.vendor)
-            new_date = st.date_input("Transaction Date", value=receipt.transaction_date)
-            new_amount = st.number_input(
-                "Amount", 
-                value=float(receipt.amount), 
-                min_value=0.01,
-                step=0.01,
-                format="%.2f"
-            )
-        
-        with col2:
-            categories = ["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment", 
-                         "Healthcare", "Travel", "Business", "Education", "Other"]
-            current_category_index = 0
-            if receipt.category in categories:
-                current_category_index = categories.index(receipt.category)
-            
-            new_category = st.selectbox("Category", categories, index=current_category_index)
-            new_currency = st.selectbox("Currency", ["USD", "EUR", "GBP", "JPY"], 
-                                      index=["USD", "EUR", "GBP", "JPY"].index(receipt.currency))
-            new_description = st.text_area("Description", value=receipt.description or "")
-        
-        # Form buttons
-        col1, col2 = st.columns(2)
-        with col1:
-            submitted = st.form_submit_button("💾 Save Changes", type="primary")
-        with col2:
-            cancelled = st.form_submit_button("❌ Cancel")
-        
-        if submitted:
-            try:
-                # Create update object
-                updates = ReceiptUpdate(
-                    vendor=new_vendor if new_vendor != receipt.vendor else None,
-                    transaction_date=new_date if new_date != receipt.transaction_date else None,
-                    amount=Decimal(str(new_amount)) if Decimal(str(new_amount)) != receipt.amount else None,
-                    category=new_category if new_category != receipt.category else None,
-                    currency=new_currency if new_currency != receipt.currency else None,
-                    description=new_description if new_description != (receipt.description or "") else None
-                )
-                
-                # Update in database
-                success = db_manager.update_receipt(receipt.id, updates)
-                
-                if success:
-                    st.success("✅ Receipt updated successfully!")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to update receipt")
-                    
-            except Exception as e:
-                logger.error(f"Error updating receipt: {str(e)}")
-                st.error(f"Error updating receipt: {str(e)}")
-
-def display_bulk_operations(selected_indices, receipts, db_manager):
-    """Display bulk operations interface.
-    
-    Args:
-        selected_indices: List of selected receipt indices
-        receipts: List of all receipts
-        db_manager: Database manager instance
-    """
-    st.subheader(f"🔧 Bulk Operations ({len(selected_indices)} receipts selected)")
-    
-    operation = st.selectbox(
-        "Choose Operation",
-        ["Select Operation", "Update Category", "Delete Receipts", "Update Currency"]
-    )
-    
-    if operation == "Update Category":
-        categories = ["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment", 
-                     "Healthcare", "Travel", "Business", "Education", "Other"]
-        new_category = st.selectbox("New Category", categories)
-        
-        if st.button("🏷️ Update Categories", type="primary"):
-            try:
-                success_count = 0
-                for idx in selected_indices:
-                    receipt = receipts[idx]
-                    update = ReceiptUpdate(category=new_category)
-                    if db_manager.update_receipt(receipt.id, update):
-                        success_count += 1
-                
-                st.success(f"✅ Updated {success_count} receipts successfully!")
-                if success_count > 0:
-                    st.rerun()
-                    
-            except Exception as e:
-                logger.error(f"Bulk category update error: {str(e)}")
-                st.error(f"Error updating categories: {str(e)}")
-    
-    elif operation == "Delete Receipts":
-        st.warning(f"⚠️ This will permanently delete {len(selected_indices)} receipts!")
-        
-        # Show receipts to be deleted
-        with st.expander("Receipts to be deleted"):
-            for idx in selected_indices:
-                receipt = receipts[idx]
-                st.write(f"• ID {receipt.id}: {receipt.vendor} - ${receipt.amount} ({receipt.transaction_date})")
-        
-        confirm_delete = st.checkbox("I confirm I want to delete these receipts")
-        
-        if confirm_delete and st.button("🗑️ Delete Receipts", type="secondary"):
-            try:
-                success_count = 0
-                for idx in selected_indices:
-                    receipt = receipts[idx]
-                    if db_manager.delete_receipt(receipt.id):
-                        success_count += 1
-                
-                st.success(f"✅ Deleted {success_count} receipts successfully!")
-                if success_count > 0:
-                    st.rerun()
-                    
-            except Exception as e:
-                logger.error(f"Bulk delete error: {str(e)}")
-                st.error(f"Error deleting receipts: {str(e)}")
     
     elif operation == "Update Currency":
         new_currency = st.selectbox("New Currency", ["USD", "EUR", "GBP", "JPY"])
@@ -778,19 +656,19 @@ def display_bulk_operations(selected_indices, receipts, db_manager):
         if st.button("💱 Update Currency", type="primary"):
             try:
                 success_count = 0
-                for idx in selected_indices:
-                    receipt = receipts[idx]
-                    update = ReceiptUpdate(currency=new_currency)
-                    if db_manager.update_receipt(receipt.id, update):
+                for receipt in selected_receipts:
+                    update_data = ReceiptUpdate(currency=new_currency)
+                    if db_manager.update_receipt(receipt.id, update_data):
                         success_count += 1
                 
                 st.success(f"✅ Updated {success_count} receipts successfully!")
-                if success_count > 0:
-                    st.rerun()
-                    
+                if success_count < len(selected_receipts):
+                    st.warning(f"⚠️ {len(selected_receipts) - success_count} updates failed")
+                st.rerun()
+                
             except Exception as e:
-                logger.error(f"Bulk currency update error: {str(e)}")
-                st.error(f"Error updating currency: {str(e)}")
+                st.error(f"❌ Bulk currency update failed: {str(e)}")
+
 
 if __name__ == "__main__":
     main()

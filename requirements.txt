@@ -1,0 +1,9 @@
+opencv-python
+pandas
+pillow
+plotly
+pydantic
+pymupdf
+pytesseract
+pytest
+streamlit>=1.47.0
