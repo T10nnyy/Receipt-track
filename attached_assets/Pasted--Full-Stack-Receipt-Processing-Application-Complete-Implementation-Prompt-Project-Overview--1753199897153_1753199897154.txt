@@ -1,0 +1,186 @@
+# Full-Stack Receipt Processing Application - Complete Implementation Prompt
+
+## Project Overview
+Create a professional full-stack receipt processing application using Python and Streamlit that extracts structured data from various file formats and provides analytical insights.
+
+## Core Requirements
+
+### 1. Project Structure & Setup
+- Implement the "src layout" directory structure with proper separation of concerns
+- Create a professional project structure with:
+  - `src/app.py` (main Streamlit entry point)
+  - `src/core/` (backend logic modules)
+  - `src/pages/` (Streamlit pages)
+  - `src/ui/` (UI components)
+  - `tests/` (test files)
+  - Root-level configuration files (`requirements.txt`, `.gitignore`, `README.md`)
+
+### 2. Technology Stack Implementation
+- **Frontend**: Streamlit with multi-page architecture
+- **Data Validation**: Pydantic models with formal type checking
+- **OCR/Text Extraction**: Hybrid approach using PyMuPDF for text-based PDFs and Tesseract+OpenCV for images
+- **Database**: SQLite with proper indexing and ACID compliance
+- **Image Processing**: OpenCV for preprocessing (perspective correction, noise removal, binarization)
+
+### 3. Backend Data Processing Layer (`src/core/`)
+
+#### A. Data Models (`models.py`)
+- Create Pydantic Receipt model with fields: vendor, transaction_date, amount, category, source_file
+- Implement validation rules (positive amounts, required fields, proper date formats)
+- Add error handling for malformed data
+
+#### B. File Processing (`parsing.py`)
+- **Multi-format dispatcher function** that intelligently routes files based on type
+- **Image preprocessing pipeline**:
+  - Perspective transformation for skewed receipts
+  - Grayscale conversion, noise removal, adaptive thresholding
+  - Optimization for OCR accuracy
+- **Text extraction methods**:
+  - Direct text parsing for machine-readable PDFs using PyMuPDF
+  - OCR pipeline using Tesseract for images and scanned PDFs
+  - Fallback logic for hybrid documents
+- **Data extraction using regex**:
+  - Vendor name extraction (heuristic-based from top lines)
+  - Date parsing (multiple format support)
+  - Amount extraction (find largest monetary value)
+
+#### C. Database Layer (`database.py`)
+- Create SQLite database with proper schema and indexes
+- Implement Data Access Layer (DAL) with functions:
+  - `add_receipt()`, `get_all_receipts()`, `update_receipt()`, `delete_receipt()`
+  - Search functions by vendor, date range, amount range
+  - Aggregation queries for statistics
+- Use parameterized queries to prevent SQL injection
+- Include proper error handling and connection management
+
+#### D. Algorithms Implementation (`algorithms.py`)
+- **Search mechanisms**:
+  - Keyword-based search with LIKE operators
+  - Range-based search for dates and amounts
+  - Pattern-based search with regex support
+  - Implement both linear and indexed search approaches
+- **Sorting algorithms**:
+  - Database-level sorting with ORDER BY clauses
+  - In-memory sorting using Python's Timsort
+  - Time complexity analysis documentation
+- **Aggregation functions**:
+  - Statistical computations (sum, mean, median, mode)
+  - Frequency distributions for vendor analysis
+  - Time-series aggregations (monthly spending trends)
+  - Use both SQL aggregates and pandas operations
+
+### 4. Frontend Implementation (Streamlit)
+
+#### A. Main Application (`src/app.py`)
+- Landing page with project overview and navigation
+- Sidebar with file upload widget and global filters
+- Session state management for user interactions
+
+#### B. Data Explorer Page (`src/pages/1_Data_Explorer.py`)
+- Interactive table display with st.dataframe
+- Search and filter controls (vendor, date range, amount range)
+- Sort functionality with column headers
+- Individual record editing capability
+- Bulk operations (delete, categorize)
+
+#### C. Analytics Dashboard (`src/pages/2_Analytics_Dashboard.py`)
+- Key metrics display using st.metric (total spend, receipt count, average)
+- Statistical visualizations:
+  - Vendor distribution bar chart
+  - Monthly spending trend line chart
+  - Category breakdown pie chart
+  - Spending patterns heatmap
+- Interactive filters and date range selectors
+- Export functionality for charts
+
+### 5. Advanced Features & Error Handling
+- **Robust error handling** with try-catch blocks and informative user feedback
+- **File validation** before processing (type, size, format checks)
+- **Processing feedback** with progress bars and status messages
+- **Data integrity checks** throughout the pipeline
+- **Graceful failure recovery** without application crashes
+
+### 6. Bonus Features Implementation
+
+#### A. Manual Data Correction (High Priority)
+- Inline editing interface for each receipt record
+- Form-based editing with pre-populated fields
+- Real-time validation during editing
+- Save/cancel functionality with session state management
+
+#### B. Data Export (High Priority)
+- CSV export functionality for filtered/searched data
+- JSON export with structured format
+- Download buttons with proper MIME types
+- Custom filename generation with timestamps
+
+#### C. Currency Detection (Medium Priority)
+- Multi-currency symbol recognition
+- Currency conversion capabilities
+- Database schema updates for currency fields
+- Localized amount formatting
+
+#### D. Multi-language Support (Lower Priority)
+- Tesseract language pack integration
+- Language detection logic
+- Language-specific parsing rules
+- UTF-8 handling throughout the application
+
+### 7. Professional Polish & Documentation
+
+#### A. Code Quality Standards
+- Follow PEP 8 style guidelines
+- Comprehensive docstrings for all functions
+- Type hints throughout the codebase
+- Modular, reusable components
+- Clear separation of concerns
+
+#### B. Testing Framework
+- Unit tests for all core functions
+- Integration tests for the full pipeline
+- Mock data for testing edge cases
+- Test coverage for error handling scenarios
+
+#### C. Documentation Requirements
+- **Professional README.md** with:
+  - Project description and features
+  - Architecture explanation and design rationale
+  - Step-by-step setup instructions
+  - Usage guide with screenshots
+  - Limitations and assumptions
+  - Future enhancement roadmap
+- **Inline code documentation**
+- **API documentation** for core functions
+
+### 8. Implementation Guidelines
+- Use dependency injection patterns where appropriate
+- Implement logging throughout the application
+- Create configuration management for settings
+- Use environment variables for sensitive data
+- Implement proper resource cleanup and memory management
+- Ensure thread safety for concurrent operations
+
+### 9. Performance Optimizations
+- Database query optimization with proper indexing
+- Image processing optimization for large files
+- Caching strategies for repeated operations
+- Memory-efficient data structures
+- Batch processing capabilities for multiple files
+
+### 10. Deployment Considerations
+- Requirements.txt with pinned versions
+- Virtual environment setup instructions
+- Environment variable configuration
+- Performance monitoring and logging
+- Error tracking and debugging capabilities
+
+## Expected Output Structure
+Generate a complete, production-ready application that demonstrates:
+- Professional software architecture
+- Advanced algorithmic thinking
+- Robust error handling
+- Intuitive user experience
+- Comprehensive documentation
+- Extensible and maintainable codebase
+
+Please implement all components with full functionality, proper error handling, and professional-grade code quality. Include detailed comments explaining complex algorithms and design decisions.
