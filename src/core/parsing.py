@@ -19,6 +19,7 @@ from PIL import Image
 import tempfile
 
 from .models import ReceiptCreate, ProcessingResult
+from .currency_detector import CurrencyDetector, MultiLanguageProcessor
 
 logger = logging.getLogger(__name__)
 
@@ -54,6 +55,10 @@ class FileProcessor:
     def __init__(self):
         """Initialize the file processor."""
         self.logger = logger
+        
+        # Initialize advanced processing components
+        self.currency_detector = CurrencyDetector()
+        self.language_processor = MultiLanguageProcessor()
         
         # Configure Tesseract if available
         try:
@@ -282,7 +287,7 @@ class FileProcessor:
             return cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
     def _extract_data_from_text(self, text: str) -> Dict[str, Any]:
-        """Extract structured data from raw text.
+        """Extract structured data from raw text with advanced language and currency detection.
         
         Args:
             text: Raw text from document
@@ -295,27 +300,39 @@ class FileProcessor:
             'vendor': None,
             'date': None,
             'amount': None,
-            'currency': 'USD'
+            'currency': 'USD',
+            'language': 'en',
+            'confidence_factors': {}
         }
         
         lines = [line.strip() for line in text.split('\n') if line.strip()]
         
+        # Detect language first
+        detected_lang, lang_confidence = self.language_processor.detect_language(text)
+        extracted['language'] = detected_lang
+        extracted['confidence_factors']['language'] = lang_confidence
+        
+        # Detect currency with language context
+        detected_currency, currency_confidence = self.currency_detector.detect_currency(
+            text, context={'language': detected_lang}
+        )
+        extracted['currency'] = detected_currency
+        extracted['confidence_factors']['currency'] = currency_confidence
+        
+        # Extract using language-specific patterns
+        lang_extracts = self.language_processor.extract_with_language_context(text, detected_lang)
+        
         # Extract vendor (usually in first few lines)
         extracted['vendor'] = self._extract_vendor(lines[:5])
         
-        # Extract date
-        extracted['date'] = self._extract_date(text)
+        # Extract date with language context
+        extracted['date'] = self._extract_date_enhanced(text, detected_lang)
         
-        # Extract amount
-        extracted['amount'] = self._extract_amount(text)
+        # Extract amount with currency normalization
+        extracted['amount'] = self._extract_amount_enhanced(text, detected_currency)
         
-        # Try to detect currency
-        if '€' in text:
-            extracted['currency'] = 'EUR'
-        elif '£' in text:
-            extracted['currency'] = 'GBP'
-        elif '¥' in text:
-            extracted['currency'] = 'JPY'
+        # Try to extract category based on vendor patterns
+        extracted['category'] = self._extract_category(extracted['vendor'] or '', detected_lang)
         
         return extracted
     
@@ -408,6 +425,143 @@ class FileProcessor:
                     continue
         
         return None
+    
+    def _extract_amount_enhanced(self, text: str, currency: str) -> Optional[str]:
+        """Extract and normalize transaction amount from text.
+        
+        Args:
+            text: Raw text content
+            currency: Detected currency code
+            
+        Returns:
+            Extracted and normalized amount string or None
+        """
+        # Try enhanced currency-aware extraction first
+        for pattern in self.AMOUNT_PATTERNS:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches:
+                if isinstance(match, tuple):
+                    amount_str = match[0]
+                else:
+                    amount_str = match
+                
+                # Use currency detector to normalize amount
+                normalized = self.currency_detector.normalize_amount(amount_str, currency)
+                if normalized and normalized > Decimal('0'):
+                    return str(normalized)
+        
+        # Fallback to basic extraction
+        return self._extract_amount(text)
+    
+    def _extract_date_enhanced(self, text: str, language: str) -> Optional[str]:
+        """Extract transaction date with language context.
+        
+        Args:
+            text: Raw text content
+            language: Detected language code
+            
+        Returns:
+            Extracted date string or None
+        """
+        # First try the standard extraction
+        date_result = self._extract_date(text)
+        if date_result:
+            return date_result
+        
+        # Try language-specific patterns
+        if language == 'es':  # Spanish
+            spanish_months = {
+                'enero': '01', 'febrero': '02', 'marzo': '03', 'abril': '04',
+                'mayo': '05', 'junio': '06', 'julio': '07', 'agosto': '08',
+                'septiembre': '09', 'octubre': '10', 'noviembre': '11', 'diciembre': '12'
+            }
+            for month_name, month_num in spanish_months.items():
+                pattern = rf'\b(\d{{1,2}})\s+de\s+{month_name}\s+de\s+(\d{{4}})\b'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    day, year = match.groups()
+                    return f"{year}-{month_num}-{int(day):02d}"
+        
+        elif language == 'fr':  # French
+            french_months = {
+                'janvier': '01', 'février': '02', 'mars': '03', 'avril': '04',
+                'mai': '05', 'juin': '06', 'juillet': '07', 'août': '08',
+                'septembre': '09', 'octobre': '10', 'novembre': '11', 'décembre': '12'
+            }
+            for month_name, month_num in french_months.items():
+                pattern = rf'\b(\d{{1,2}})\s+{month_name}\s+(\d{{4}})\b'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    day, year = match.groups()
+                    return f"{year}-{month_num}-{int(day):02d}"
+        
+        elif language == 'de':  # German
+            german_months = {
+                'januar': '01', 'februar': '02', 'märz': '03', 'april': '04',
+                'mai': '05', 'juni': '06', 'juli': '07', 'august': '08',
+                'september': '09', 'oktober': '10', 'november': '11', 'dezember': '12'
+            }
+            for month_name, month_num in german_months.items():
+                pattern = rf'\b(\d{{1,2}})\.\s*{month_name}\s+(\d{{4}})\b'
+                match = re.search(pattern, text, re.IGNORECASE)
+                if match:
+                    day, year = match.groups()
+                    return f"{year}-{month_num}-{int(day):02d}"
+        
+        return None
+    
+    def _extract_category(self, vendor: str, language: str) -> Optional[str]:
+        """Extract or predict category based on vendor name and language.
+        
+        Args:
+            vendor: Vendor name
+            language: Detected language
+            
+        Returns:
+            Predicted category or None
+        """
+        if not vendor:
+            return None
+        
+        vendor_lower = vendor.lower()
+        
+        # Common category keywords by language
+        category_keywords = {
+            'en': {
+                'Food & Dining': ['restaurant', 'cafe', 'coffee', 'pizza', 'burger', 'deli', 'bakery', 'bar', 'pub', 'bistro', 'kitchen', 'grill', 'food', 'dining', 'starbucks', 'mcdonald', 'subway'],
+                'Gas & Fuel': ['gas', 'fuel', 'station', 'shell', 'exxon', 'bp', 'chevron', 'mobil', 'petrol'],
+                'Shopping': ['store', 'shop', 'market', 'mall', 'outlet', 'walmart', 'target', 'costco', 'amazon', 'retail'],
+                'Healthcare': ['hospital', 'clinic', 'pharmacy', 'medical', 'dental', 'doctor', 'health'],
+                'Entertainment': ['theater', 'cinema', 'movie', 'concert', 'game', 'entertainment', 'netflix', 'spotify'],
+                'Travel': ['hotel', 'airline', 'airport', 'taxi', 'uber', 'lyft', 'rental', 'booking'],
+                'Business': ['office', 'supplies', 'service', 'consulting', 'software', 'tech']
+            },
+            'es': {
+                'Food & Dining': ['restaurante', 'café', 'pizzería', 'bar', 'cocina', 'comida'],
+                'Gas & Fuel': ['gasolina', 'combustible', 'estación'],
+                'Shopping': ['tienda', 'mercado', 'centro comercial'],
+                'Healthcare': ['hospital', 'clínica', 'farmacia', 'médico', 'salud'],
+                'Entertainment': ['teatro', 'cine', 'concierto', 'entretenimiento'],
+                'Travel': ['hotel', 'aerolínea', 'aeropuerto', 'taxi', 'viaje']
+            },
+            'fr': {
+                'Food & Dining': ['restaurant', 'café', 'pizzeria', 'bar', 'cuisine', 'nourriture'],
+                'Gas & Fuel': ['essence', 'carburant', 'station'],
+                'Shopping': ['magasin', 'marché', 'centre commercial'],
+                'Healthcare': ['hôpital', 'clinique', 'pharmacie', 'médecin', 'santé'],
+                'Entertainment': ['théâtre', 'cinéma', 'concert', 'divertissement'],
+                'Travel': ['hôtel', 'compagnie aérienne', 'aéroport', 'taxi', 'voyage']
+            }
+        }
+        
+        lang_categories = category_keywords.get(language, category_keywords['en'])
+        
+        for category, keywords in lang_categories.items():
+            for keyword in keywords:
+                if keyword in vendor_lower:
+                    return category
+        
+        return "Other"
     
     def _extract_amount(self, text: str) -> Optional[str]:
         """Extract transaction amount from text.

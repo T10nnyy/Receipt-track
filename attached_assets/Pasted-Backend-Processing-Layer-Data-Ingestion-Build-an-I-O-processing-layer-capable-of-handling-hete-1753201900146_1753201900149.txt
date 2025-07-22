@@ -1,0 +1,45 @@
+Backend / Processing Layer
+● Data Ingestion: Build an I/O processing layer capable of handling heterogeneous file
+formats (.jpg, .png, .pdf, .txt). Implement validation mechanisms using formal
+type-checking (e.g., Pydantic models) to ensure data integrity.
+● Data Parsing: Parse and extract structured data fields including:
+○ Vendor / Biller
+○ Date of Transaction / Billing Period
+○ Amount
+○ Category (optional: mapped from known vendors)
+● Data Storage: Store extracted tuples in normalized form within a lightweight
+relational database (SQLite), ensuring ACID compliance and indexing for optimized
+search performance.
+Algorithmic Implementation
+Implement the following computational routines:
+● Search Algorithms:- Design keyword-, range-, and pattern-based search
+mechanisms using string matching and comparison operators. Apply both linear
+search and, where appropriate, hashed indexing for optimization.
+● Sorting Algorithms:- Enable sorting based on numerical and categorical fields.
+Apply efficient in-memory sorting techniques (e.g., Timsort or custom
+quicksort/mergesort) and analyze their time complexities (e.g., O(n log n)).
+● Aggregation Functions: Compute statistical aggregates:
+○ Sum, mean, median, mode of expenditure
+
+○ Frequency distributions (histograms) of vendor occurrences
+○ Time-series aggregations (e.g., monthly spend trend using sliding windows)
+
+Note: Apply native Python data structures and algorithmic thinking for parsing, searching,
+and sorting logic.
+
+Dashboard / UI (Streamlit, React, or Framework of Choice)
+● Display a list of uploaded receipts and bills with extracted fields.
+● Tabular View:- Show individual records with parsed fields
+● Statistical Visualizations:- Categorical distributions via bar/pie charts (i.e., visual
+representation of multinomial frequency distributions)
+● Time-series expenditure graphs using line charts (applying moving averages or
+deltas to show trends)
+Validation & Error Handling
+Apply formal validation rules on file types, parsing logic, and data schemas. Use exception
+handling to implement fail-safes and provide informative feedback without halting system
+operations.
+Bonus Features (Stretch Goals)
+● Enable manual correction of parsed fields via the UI.
+● Allow export of summaries as .csv or .json.
+● Support currency detection or multi-currency handling.
+● Process multi-language receipts/bills.

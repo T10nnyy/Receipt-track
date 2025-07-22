@@ -226,14 +226,27 @@ class AnalyticsEngine:
         
         amounts = [float(receipt.amount) for receipt in receipts]
         
+        # Calculate mode (most frequent amount)
+        try:
+            mode_amount = Decimal(str(statistics.mode(amounts)))
+        except statistics.StatisticsError:
+            # No unique mode, use multimode or median
+            try:
+                modes = statistics.multimode(amounts)
+                mode_amount = Decimal(str(modes[0])) if modes else Decimal(str(statistics.median(amounts)))
+            except:
+                mode_amount = Decimal(str(statistics.median(amounts)))
+        
         return {
             "count": len(receipts),
             "total_amount": sum(receipt.amount for receipt in receipts),
             "average_amount": Decimal(str(statistics.mean(amounts))),
             "median_amount": Decimal(str(statistics.median(amounts))),
+            "mode_amount": mode_amount,
             "min_amount": min(receipt.amount for receipt in receipts),
             "max_amount": max(receipt.amount for receipt in receipts),
-            "std_deviation": statistics.stdev(amounts) if len(amounts) > 1 else 0.0
+            "std_deviation": statistics.stdev(amounts) if len(amounts) > 1 else 0.0,
+            "variance": statistics.variance(amounts) if len(amounts) > 1 else 0.0
         }
     
     def analyze_spending_patterns(self, receipts: List[Receipt]) -> Dict[str, Any]:

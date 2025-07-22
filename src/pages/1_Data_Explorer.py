@@ -17,6 +17,7 @@ sys.path.insert(0, str(src_path))
 
 from core.models import SearchFilters, ReceiptUpdate
 from core.algorithms import SearchEngine
+from core.export import DataExporter
 from ui.components import display_search_filters, display_edit_modal
 
 logger = logging.getLogger(__name__)
@@ -256,63 +257,145 @@ def main():
             if selected_indices:
                 display_bulk_operations(selected_indices, receipts, db_manager)
         
-        # Export functionality
+        # Enhanced Export functionality
         st.markdown("---")
         st.subheader("📥 Export Data")
         
+        # Initialize data exporter
+        if 'data_exporter' not in st.session_state:
+            st.session_state.data_exporter = DataExporter()
+        
+        exporter = st.session_state.data_exporter
+        
+        # Export options
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            export_format = st.selectbox(
+                "Export Format",
+                options=["CSV", "JSON"],
+                index=0
+            )
+            
+            export_scope = st.selectbox(
+                "Export Scope",
+                options=["Current View", "All Data", "Summary", "Analytics"],
+                index=0,
+                help="Choose what data to export"
+            )
+        
+        with col2:
+            include_metadata = st.checkbox(
+                "Include Metadata",
+                value=True,
+                help="Include processing confidence, timestamps, etc."
+            )
+            
+            if st.button("📤 Generate Export", type="primary"):
+                try:
+                    if export_scope == "Current View":
+                        export_receipts = receipts
+                    elif export_scope == "All Data":
+                        export_receipts = db_manager.get_all_receipts()
+                    else:
+                        export_receipts = receipts  # Use current view for summary/analytics
+                    
+                    if export_format.lower() == "csv":
+                        if export_scope == "Summary":
+                            st.warning("Summary export is only available in JSON format")
+                        else:
+                            export_data = exporter.export_to_csv(
+                                export_receipts,
+                                include_metadata=include_metadata
+                            )
+                            filename = exporter.get_export_filename(
+                                "csv",
+                                export_scope.lower().replace(" ", "_")
+                            )
+                    else:  # JSON
+                        format_type = {
+                            "Current View": "detailed",
+                            "All Data": "detailed", 
+                            "Summary": "summary",
+                            "Analytics": "analytics"
+                        }.get(export_scope, "detailed")
+                        
+                        export_data = exporter.export_to_json(
+                            export_receipts,
+                            include_metadata=include_metadata,
+                            format_type=format_type
+                        )
+                        filename = exporter.get_export_filename(
+                            "json",
+                            export_scope.lower().replace(" ", "_")
+                        )
+                    
+                    # Provide download
+                    st.success(f"Export generated successfully! ({len(export_receipts)} receipts)")
+                    st.download_button(
+                        label=f"📥 Download {export_format}",
+                        data=export_data,
+                        file_name=filename,
+                        mime="text/csv" if export_format.lower() == "csv" else "application/json",
+                        key=f"download_{export_scope}_{export_format}"
+                    )
+                    
+                except Exception as e:
+                    st.error(f"Export failed: {str(e)}")
+                    logger.error(f"Export error: {str(e)}")
+        
+        # Quick export buttons
+        st.markdown("### Quick Export")
         col1, col2, col3 = st.columns(3)
         
         with col1:
-            if st.button("📄 Export to CSV"):
-                csv_data = df.to_csv(index=False)
-                st.download_button(
-                    label="Download CSV",
-                    data=csv_data,
-                    file_name=f"receipts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                    mime="text/csv"
-                )
+            if st.button("📄 Quick CSV"):
+                try:
+                    csv_data = exporter.export_to_csv(receipts, include_metadata=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv_data,
+                        file_name=f"receipts_quick_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv",
+                        key="quick_csv"
+                    )
+                except Exception as e:
+                    st.error(f"Quick CSV export failed: {str(e)}")
         
         with col2:
-            if st.button("📊 Export to JSON"):
-                json_data = df.to_json(orient="records", indent=2)
-                st.download_button(
-                    label="Download JSON",
-                    data=json_data,
-                    file_name=f"receipts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
+            if st.button("📊 Summary JSON"):
+                try:
+                    json_data = exporter.export_to_json(receipts, format_type="summary")
+                    st.download_button(
+                        label="Download Summary",
+                        data=json_data,
+                        file_name=f"receipts_summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        key="quick_summary"
+                    )
+                except Exception as e:
+                    st.error(f"Summary export failed: {str(e)}")
         
         with col3:
-            if st.button("📈 Export Filtered Data"):
-                filtered_data = []
-                for receipt in receipts:
-                    filtered_data.append({
-                        "id": receipt.id,
-                        "vendor": receipt.vendor,
-                        "transaction_date": receipt.transaction_date.isoformat(),
-                        "amount": float(receipt.amount),
-                        "category": receipt.category,
-                        "currency": receipt.currency,
-                        "source_file": receipt.source_file,
-                        "description": receipt.description,
-                        "processing_confidence": receipt.processing_confidence
-                    })
-                
-                import json
-                json_data = json.dumps(filtered_data, indent=2)
-                st.download_button(
-                    label="Download Filtered JSON",
-                    data=json_data,
-                    file_name=f"filtered_receipts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
-                    mime="application/json"
-                )
+            if st.button("📈 Analytics Export"):
+                try:
+                    analytics_data = exporter.export_to_json(receipts, format_type="analytics")
+                    st.download_button(
+                        label="Download Analytics",
+                        data=analytics_data,
+                        file_name=f"receipts_analytics_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
+                        mime="application/json",
+                        key="quick_analytics"
+                    )
+                except Exception as e:
+                    st.error(f"Analytics export failed: {str(e)}")
         
     except Exception as e:
         logger.error(f"Error in Data Explorer: {str(e)}")
         st.error(f"An error occurred: {str(e)}")
 
 def display_edit_form(receipt, db_manager):
-    """Display edit form for a selected receipt.
+    """Display comprehensive edit form for a selected receipt.
     
     Args:
         receipt: Receipt object to edit
@@ -320,8 +403,255 @@ def display_edit_form(receipt, db_manager):
     """
     st.subheader(f"✏️ Edit Receipt ID: {receipt.id}")
     
+    # Show confidence indicators
+    confidence = receipt.processing_confidence or 0
+    if confidence < 0.7:
+        st.warning(f"⚠️ Low confidence ({confidence*100:.1f}%) - Please review carefully")
+    elif confidence < 0.9:
+        st.info(f"ℹ️ Medium confidence ({confidence*100:.1f}%) - Some fields may need verification")
+    else:
+        st.success(f"✅ High confidence ({confidence*100:.1f}%) - Data appears reliable")
+    
     with st.form(f"edit_receipt_{receipt.id}"):
         col1, col2 = st.columns(2)
+        
+        with col1:
+            new_vendor = st.text_input(
+                "Vendor Name",
+                value=receipt.vendor,
+                help="The name of the merchant or business"
+            )
+            
+            new_amount = st.number_input(
+                "Amount",
+                value=float(receipt.amount),
+                min_value=0.01,
+                step=0.01,
+                format="%.2f",
+                help="Transaction amount in the specified currency"
+            )
+            
+            new_category = st.selectbox(
+                "Category",
+                options=["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment", 
+                        "Healthcare", "Travel", "Business", "Education", "Other"],
+                index=["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment", 
+                       "Healthcare", "Travel", "Business", "Education", "Other"].index(
+                    receipt.category or "Other"
+                ),
+                help="Expense category for better organization"
+            )
+            
+            new_currency = st.selectbox(
+                "Currency",
+                options=["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "CHF"],
+                index=["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "CHF"].index(
+                    receipt.currency if receipt.currency in ["USD", "EUR", "GBP", "JPY", "CNY", "CAD", "AUD", "CHF"] else "USD"
+                ),
+                help="Currency code (3-letter ISO code)"
+            )
+        
+        with col2:
+            new_date = st.date_input(
+                "Transaction Date",
+                value=receipt.transaction_date,
+                help="The date when the transaction occurred"
+            )
+            
+            new_description = st.text_area(
+                "Description",
+                value=receipt.description or "",
+                height=100,
+                help="Additional notes or description about the transaction"
+            )
+            
+            # Show original source file info
+            st.text_input(
+                "Source File",
+                value=receipt.source_file,
+                disabled=True,
+                help="Original file name (read-only)"
+            )
+            
+            # Confidence override
+            new_confidence = st.slider(
+                "Processing Confidence",
+                min_value=0.0,
+                max_value=1.0,
+                value=confidence,
+                step=0.1,
+                help="Your confidence in the accuracy of this data"
+            )
+        
+        # Form submission
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            submit_button = st.form_submit_button(
+                "💾 Save Changes",
+                type="primary"
+            )
+        
+        with col2:
+            if st.form_submit_button("🔄 Reset to Original"):
+                st.rerun()
+        
+        with col3:
+            delete_button = st.form_submit_button(
+                "🗑️ Delete Receipt",
+                type="secondary"
+            )
+        
+        if submit_button:
+            try:
+                # Create update object
+                update_data = ReceiptUpdate(
+                    vendor=new_vendor if new_vendor != receipt.vendor else None,
+                    transaction_date=new_date if new_date != receipt.transaction_date else None,
+                    amount=Decimal(str(new_amount)) if new_amount != float(receipt.amount) else None,
+                    category=new_category if new_category != receipt.category else None,
+                    currency=new_currency if new_currency != receipt.currency else None,
+                    description=new_description if new_description != (receipt.description or "") else None,
+                    processing_confidence=new_confidence if new_confidence != confidence else None
+                )
+                
+                # Update in database
+                success = db_manager.update_receipt(receipt.id, update_data)
+                
+                if success:
+                    st.success("✅ Receipt updated successfully!")
+                    st.rerun()
+                else:
+                    st.error("❌ Failed to update receipt")
+                    
+            except Exception as e:
+                st.error(f"❌ Error updating receipt: {str(e)}")
+                logger.error(f"Receipt update error: {str(e)}")
+        
+        if delete_button:
+            # Confirmation dialog (simulated)
+            st.warning("⚠️ Are you sure you want to delete this receipt? This action cannot be undone.")
+            if st.checkbox(f"Yes, delete receipt ID {receipt.id}"):
+                try:
+                    success = db_manager.delete_receipt(receipt.id)
+                    if success:
+                        st.success("🗑️ Receipt deleted successfully!")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to delete receipt")
+                except Exception as e:
+                    st.error(f"❌ Error deleting receipt: {str(e)}")
+                    logger.error(f"Receipt deletion error: {str(e)}")
+
+
+def display_bulk_operations(selected_indices, receipts, db_manager):
+    """Display bulk operations interface.
+    
+    Args:
+        selected_indices: List of selected receipt indices
+        receipts: List of all receipts
+        db_manager: Database manager instance
+    """
+    st.subheader(f"🔧 Bulk Operations ({len(selected_indices)} receipts selected)")
+    
+    selected_receipts = [receipts[i] for i in selected_indices]
+    
+    # Show selected receipts summary
+    with st.expander("📋 Selected Receipts", expanded=False):
+        for receipt in selected_receipts:
+            st.write(f"• **{receipt.vendor}** - ${receipt.amount} on {receipt.transaction_date}")
+    
+    # Bulk operations options
+    operation = st.selectbox(
+        "Select Operation",
+        options=[
+            "Update Category",
+            "Update Currency", 
+            "Add Description",
+            "Update Confidence",
+            "Export Selected",
+            "Delete Selected"
+        ]
+    )
+    
+    if operation == "Update Category":
+        new_category = st.selectbox(
+            "New Category",
+            options=["Food & Dining", "Gas & Fuel", "Shopping", "Entertainment",
+                    "Healthcare", "Travel", "Business", "Education", "Other"]
+        )
+        
+        if st.button("🏷️ Apply Category to All Selected"):
+            try:
+                success_count = 0
+                for receipt in selected_receipts:
+                    update_data = ReceiptUpdate(category=new_category)
+                    if db_manager.update_receipt(receipt.id, update_data):
+                        success_count += 1
+                
+                st.success(f"✅ Updated category for {success_count} receipts!")
+                if success_count < len(selected_receipts):
+                    st.warning(f"⚠️ {len(selected_receipts) - success_count} updates failed")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Bulk update failed: {str(e)}")
+    
+    elif operation == "Export Selected":
+        if 'data_exporter' not in st.session_state:
+            st.session_state.data_exporter = DataExporter()
+        
+        exporter = st.session_state.data_exporter
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            export_format = st.selectbox("Format", ["CSV", "JSON"])
+        with col2:
+            include_meta = st.checkbox("Include Metadata", value=True)
+        
+        if st.button("📤 Export Selected Receipts"):
+            try:
+                if export_format == "CSV":
+                    data = exporter.export_to_csv(selected_receipts, include_meta)
+                    filename = f"selected_receipts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                    mime = "text/csv"
+                else:
+                    data = exporter.export_to_json(selected_receipts, include_meta)
+                    filename = f"selected_receipts_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+                    mime = "application/json"
+                
+                st.download_button(
+                    label=f"📥 Download {export_format}",
+                    data=data,
+                    file_name=filename,
+                    mime=mime
+                )
+                
+            except Exception as e:
+                st.error(f"❌ Export failed: {str(e)}")
+    
+    elif operation == "Delete Selected":
+        st.warning("⚠️ **WARNING**: This will permanently delete the selected receipts!")
+        
+        if st.checkbox("I understand this action cannot be undone"):
+            if st.button("🗑️ Delete Selected Receipts", type="secondary"):
+                try:
+                    success_count = 0
+                    for receipt in selected_receipts:
+                        if db_manager.delete_receipt(receipt.id):
+                            success_count += 1
+                    
+                    st.success(f"🗑️ Deleted {success_count} receipts!")
+                    if success_count < len(selected_receipts):
+                        st.warning(f"⚠️ {len(selected_receipts) - success_count} deletions failed")
+                    st.rerun()
+                    
+                except Exception as e:
+                    st.error(f"❌ Bulk deletion failed: {str(e)}")
+
+
+if __name__ == "__main__":
+    main()
         
         with col1:
             new_vendor = st.text_input("Vendor", value=receipt.vendor)
