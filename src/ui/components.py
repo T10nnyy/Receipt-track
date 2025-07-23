@@ -146,45 +146,55 @@ def create_processing_result_from_dict(result_dict: Dict[str, Any], processing_t
         ProcessingResult object
     """
     try:
-        # Create a ProcessingResult object from the dictionary
-        processing_result = ProcessingResult()
+        # Handle empty or None result_dict
+        if not result_dict:
+            result_dict = {}
         
-        # Set basic attributes
-        processing_result.success = result_dict.get("success", False)
-        processing_result.processing_time = processing_time
-        processing_result.errors = result_dict.get("errors", [])
+        # Ensure required fields are present with defaults
+        processed_data = {
+            "success": result_dict.get("success", False),
+            "processing_time": processing_time,
+            "errors": result_dict.get("errors", []),
+            "confidence_score": result_dict.get("confidence", result_dict.get("confidence_score", 0.0)),
+            "receipt": result_dict.get("receipt", None)
+        }
         
-        # Handle confidence score
-        processing_result.confidence_score = result_dict.get("confidence", 0.0)
+        # If we have text but no receipt, note it for potential parsing
+        if not processed_data["receipt"] and "text" in result_dict:
+            # Add text to errors for debugging, or implement text-to-receipt parsing
+            if "extracted_text" not in processed_data:
+                processed_data["extracted_text"] = result_dict["text"]
         
-        # If successful and has receipt data, set the receipt
-        if processing_result.success and "receipt" in result_dict:
-            processing_result.receipt = result_dict["receipt"]
-        elif processing_result.success and "text" in result_dict:
-            # If we only have text, we need to parse it into a receipt
-            # This is a placeholder - you'll need to implement text parsing
-            processing_result.receipt = None  # Implement text-to-receipt parsing here
-        else:
-            processing_result.receipt = None
-            
-        # Add any error messages
-        if not processing_result.success:
-            error_msg = result_dict.get("error", "Unknown processing error")
-            if error_msg not in processing_result.errors:
-                processing_result.errors.append(error_msg)
+        # If processing failed but no errors provided, add a generic error
+        if not processed_data["success"] and not processed_data["errors"]:
+            error_msg = result_dict.get("error", "Unknown processing error occurred")
+            processed_data["errors"] = [error_msg]
+        
+        # Create ProcessingResult with proper field mapping
+        processing_result = ProcessingResult(**processed_data)
         
         return processing_result
         
     except Exception as e:
         logger.error(f"Error creating ProcessingResult from dict: {str(e)}")
-        # Return a failed result
-        failed_result = ProcessingResult()
-        failed_result.success = False
-        failed_result.errors = [f"Error converting result: {str(e)}"]
-        failed_result.processing_time = processing_time
-        failed_result.confidence_score = 0.0
-        failed_result.receipt = None
-        return failed_result
+        logger.error(f"Input dict: {result_dict}")
+        
+        # Return a properly constructed failed result
+        try:
+            failed_result = ProcessingResult(
+                success=False,
+                errors=[f"Error converting result: {str(e)}"],
+                processing_time=processing_time,
+                confidence_score=0.0,
+                receipt=None
+            )
+            return failed_result
+        except Exception as fallback_error:
+            logger.error(f"Failed to create fallback ProcessingResult: {str(fallback_error)}")
+            # If even the fallback fails, we need to handle this gracefully
+            # This suggests the ProcessingResult model definition might need review
+            raise Exception(f"Unable to create ProcessingResult: {str(e)}. Fallback also failed: {str(fallback_error)}")
+
 
 def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confidence_threshold: float, manual_review: bool):
     """Process uploaded files and display results.
@@ -228,6 +238,11 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
             progress_bar.progress(progress)
             status_text.text(f"Processing {uploaded_file.name}... ({i + 1}/{len(uploaded_files)})")
             
+            # Validate file before processing
+            is_valid, error_msg = validate_file_upload(uploaded_file)
+            if not is_valid:
+                raise ValueError(f"File validation failed: {error_msg}")
+            
             # Read file content
             file_content = uploaded_file.read()
             uploaded_file.seek(0)  # Reset file pointer
@@ -241,10 +256,20 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
             # Convert to ProcessingResult if it's a dictionary
             if isinstance(raw_result, dict):
                 result = create_processing_result_from_dict(raw_result, processing_time)
-            else:
-                result = raw_result  # Assume it's already a ProcessingResult object
+            elif hasattr(raw_result, 'success'):  # Already a ProcessingResult-like object
+                result = raw_result
                 if not hasattr(result, 'processing_time'):
                     result.processing_time = processing_time
+            else:
+                # Unexpected result type, treat as failure
+                logger.warning(f"Unexpected result type: {type(raw_result)}")
+                result = ProcessingResult(
+                    success=False,
+                    errors=[f"Unexpected result type: {type(raw_result)}"],
+                    processing_time=processing_time,
+                    confidence_score=0.0,
+                    receipt=None
+                )
             
             # Record processing info
             file_info = {
@@ -257,7 +282,7 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
             
             if result.success and result.receipt:
                 # Check confidence
-                confidence = result.confidence_score or 0.0
+                confidence = getattr(result, 'confidence_score', 0.0) or 0.0
                 
                 if confidence >= confidence_threshold:
                     # Auto-categorize if enabled
@@ -265,18 +290,25 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
                         result.receipt.category = categorize_receipt(result.receipt)
                     
                     # Save to database
-                    receipt_id = db_manager.add_receipt(result.receipt)
-                    
-                    file_info['extracted_data'] = {
-                        'receipt_id': receipt_id,
-                        'vendor': result.receipt.vendor,
-                        'amount': float(result.receipt.amount),
-                        'date': result.receipt.transaction_date.isoformat(),
-                        'category': result.receipt.category,
-                        'confidence': confidence
-                    }
-                    
-                    successful_processes += 1
+                    try:
+                        receipt_id = db_manager.add_receipt(result.receipt)
+                        
+                        file_info['extracted_data'] = {
+                            'receipt_id': receipt_id,
+                            'vendor': getattr(result.receipt, 'vendor', 'Unknown'),
+                            'amount': float(getattr(result.receipt, 'amount', 0.0)),
+                            'date': getattr(result.receipt, 'transaction_date', datetime.now().date()).isoformat(),
+                            'category': getattr(result.receipt, 'category', 'Other'),
+                            'confidence': confidence
+                        }
+                        
+                        successful_processes += 1
+                        
+                    except Exception as db_error:
+                        logger.error(f"Database error for {uploaded_file.name}: {str(db_error)}")
+                        file_info['status'] = 'Database Error'
+                        file_info['errors'] = [f"Failed to save to database: {str(db_error)}"]
+                        failed_processes += 1
                     
                 elif manual_review:
                     # Flag for manual review
@@ -286,6 +318,7 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
                         'confidence': confidence
                     })
                     file_info['status'] = 'Needs Review'
+                    file_info['confidence'] = confidence
                 else:
                     # Skip low confidence items
                     file_info['status'] = 'Skipped (Low Confidence)'
@@ -294,7 +327,9 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
                     
             else:
                 # Processing failed
-                file_info['errors'] = result.errors if hasattr(result, 'errors') else ["Unknown error"]
+                file_info['errors'] = getattr(result, 'errors', ["Unknown error"])
+                if hasattr(result, 'confidence_score'):
+                    file_info['confidence'] = result.confidence_score
                 failed_processes += 1
             
             # Add to processed files history
@@ -308,7 +343,8 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
                 'filename': uploaded_file.name,
                 'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                 'status': 'Error',
-                'error': str(e)
+                'error': str(e),
+                'processing_time': (datetime.now() - start_time).total_seconds()
             }
             st.session_state.processed_files.append(file_info)
     
@@ -338,14 +374,17 @@ def process_uploaded_files(uploaded_files: List, auto_categorize: bool, confiden
             
             # Show error details for failed files
             with st.expander("❌ View Failed Files", expanded=False):
-                failed_files = [f for f in st.session_state.processed_files if f['status'] in ['Failed', 'Error']]
+                failed_files = [f for f in st.session_state.processed_files 
+                               if f['status'] in ['Failed', 'Error', 'Database Error', 'Skipped (Low Confidence)']]
                 for file_info in failed_files[-5:]:  # Show last 5 failed files
-                    st.write(f"**{file_info['filename']}**")
+                    st.write(f"**{file_info['filename']}** - {file_info['status']}")
                     if 'error' in file_info:
                         st.text(f"Error: {file_info['error']}")
                     if 'errors' in file_info:
                         for error in file_info['errors']:
                             st.text(f"• {error}")
+                    if 'confidence' in file_info:
+                        st.text(f"Confidence: {file_info['confidence']:.1%}")
                     st.markdown("---")
         
         # Manual review section
